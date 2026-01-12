@@ -66,13 +66,21 @@ router.get('/search', async (req, res) => {
   try {
     const dataQuery = `
       MATCH (m:Movie)
-      OPTIONAL MATCH (d:Director)-[:DIRECTED]->(m)
-      OPTIONAL MATCH (a:Actor)-[:ACTED_IN]->(m)
       WHERE
         toLower(m.title) CONTAINS toLower($query)
-        OR toLower(d.name) CONTAINS toLower($query)
-        OR toLower(a.name) CONTAINS toLower($query)
+        OR EXISTS {
+          MATCH (p)-[:ACTED_IN]->(m)
+          WHERE toLower(p.name) CONTAINS toLower($query)
+        }
+        OR EXISTS {
+          MATCH (p)-[:DIRECTED]->(m)
+          WHERE toLower(p.name) CONTAINS toLower($query)
+        }
+
+      OPTIONAL MATCH (d:Director)-[:DIRECTED]->(m)
+      OPTIONAL MATCH (a:Actor)-[:ACTED_IN]->(m)
       OPTIONAL MATCH (u:User)-[:RATED]->(m)
+
       RETURN
         m,
         d,
@@ -80,6 +88,7 @@ router.get('/search', async (req, res) => {
         avg(u.rating) AS avgRating
       SKIP toInteger($skip)
       LIMIT toInteger($limit)
+
     `;
 
     const countQuery = `
