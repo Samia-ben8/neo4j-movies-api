@@ -5,12 +5,16 @@ import { mapNeo4jToMovie } from '../utils/mappers.js';
 const router = express.Router();
 
 /**
- * 1️⃣ GET /api/movies
- * Liste des films
+ * GET /api/movies?page=&limit=
+ * Catalogue des films (paginé)
  */
 router.get('/', async (req, res) => {
+  const page = parseInt(req.query.page || '1');
+  const limit = parseInt(req.query.limit || '50');
+  const skip = (page - 1) * limit;
+
   try {
-    const query = `
+    const dataQuery = `
       MATCH (m:Movie)
       OPTIONAL MATCH (d:Director)-[:DIRECTED]->(m)
       OPTIONAL MATCH (a:Actor)-[:ACTED_IN]->(m)
@@ -20,13 +24,26 @@ router.get('/', async (req, res) => {
         d,
         collect(DISTINCT a) AS actors,
         avg(u.rating) AS avgRating
-      LIMIT 50
+      SKIP toInteger($skip)
+      LIMIT toInteger($limit)
     `;
 
-    const records = await runQuery(query);
-    const movies = records.map(mapNeo4jToMovie);
+    const countQuery = `
+      MATCH (m:Movie)
+      RETURN count(m) AS total
+    `;
 
-    res.json(movies);
+    const [records, countResult] = await Promise.all([
+      runQuery(dataQuery, { skip, limit }),
+      runQuery(countQuery)
+    ]);
+
+    res.json({
+      page,
+      limit,
+      total: countResult[0].get('total').toNumber(),
+      movies: records.map(mapNeo4jToMovie)
+    });
   } catch (error) {
     console.error('Erreur GET /api/movies:', error);
     res.status(500).json({ message: 'Server error' });
@@ -34,19 +51,20 @@ router.get('/', async (req, res) => {
 });
 
 /**
- * 2️⃣ GET /api/movies/search?q=
- * Recherche par titre / acteur / réalisateur
- * ⚠️ DOIT ÊTRE AVANT /:id
+ * GET /api/movies/search?q=&page=&limit=
  */
 router.get('/search', async (req, res) => {
   const { q } = req.query;
+  const page = parseInt(req.query.page || '1');
+  const limit = parseInt(req.query.limit || '50');
+  const skip = (page - 1) * limit;
 
   if (!q || q.trim() === '') {
-    return res.json([]);
+    return res.json({ page, limit, total: 0, movies: [] });
   }
 
   try {
-    const query = `
+    const dataQuery = `
       MATCH (m:Movie)
       OPTIONAL MATCH (d:Director)-[:DIRECTED]->(m)
       OPTIONAL MATCH (a:Actor)-[:ACTED_IN]->(m)
@@ -60,21 +78,40 @@ router.get('/search', async (req, res) => {
         d,
         collect(DISTINCT a) AS actors,
         avg(u.rating) AS avgRating
-      LIMIT 50
+      SKIP toInteger($skip)
+      LIMIT toInteger($limit)
     `;
 
-    const records = await runQuery(query, { query: q });
-    const movies = records.map(mapNeo4jToMovie);
+    const countQuery = `
+      MATCH (m:Movie)
+      OPTIONAL MATCH (d:Director)-[:DIRECTED]->(m)
+      OPTIONAL MATCH (a:Actor)-[:ACTED_IN]->(m)
+      WHERE
+        toLower(m.title) CONTAINS toLower($query)
+        OR toLower(d.name) CONTAINS toLower($query)
+        OR toLower(a.name) CONTAINS toLower($query)
+      RETURN count(DISTINCT m) AS total
+    `;
 
-    res.json(movies);
+    const [records, countResult] = await Promise.all([
+      runQuery(dataQuery, { query: q, skip, limit }),
+      runQuery(countQuery, { query: q })
+    ]);
+
+    res.json({
+      page,
+      limit,
+      total: countResult[0].get('total').toNumber(),
+      movies: records.map(mapNeo4jToMovie)
+    });
   } catch (error) {
     console.error('Erreur GET /api/movies/search:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });
+
 /**
  * GET /api/movies/trending
- * Films les mieux notés
  */
 router.get('/trending', async (req, res) => {
   try {
@@ -92,23 +129,30 @@ router.get('/trending', async (req, res) => {
     `;
 
     const records = await runQuery(query);
-    const movies = records.map(mapNeo4jToMovie);
 
-    res.json(movies);
+    res.json({
+      page: null,
+      limit: 10,
+      total: records.length,
+      movies: records.map(mapNeo4jToMovie)
+    });
   } catch (error) {
     console.error('Erreur GET /api/movies/trending:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });
+
 /**
- * GET /api/movies/genre/:genreId
- * Films par genre
+ * GET /api/movies/genre/:genreId?page=&limit=
  */
 router.get('/genre/:genreId', async (req, res) => {
   const { genreId } = req.params;
+  const page = parseInt(req.query.page || '1');
+  const limit = parseInt(req.query.limit || '50');
+  const skip = (page - 1) * limit;
 
   try {
-    const query = `
+    const dataQuery = `
       MATCH (m:Movie)-[:IN_GENRE]->(g:Genre)
       WHERE toLower(g.name) = toLower($genre)
       OPTIONAL MATCH (d:Director)-[:DIRECTED]->(m)
@@ -119,13 +163,27 @@ router.get('/genre/:genreId', async (req, res) => {
         d,
         collect(DISTINCT a) AS actors,
         avg(u.rating) AS avgRating
-      LIMIT 50
+      SKIP toInteger($skip)
+      LIMIT toInteger($limit)
     `;
 
-    const records = await runQuery(query, { genre: genreId });
-    const movies = records.map(mapNeo4jToMovie);
+    const countQuery = `
+      MATCH (m:Movie)-[:IN_GENRE]->(g:Genre)
+      WHERE toLower(g.name) = toLower($genre)
+      RETURN count(m) AS total
+    `;
 
-    res.json(movies);
+    const [records, countResult] = await Promise.all([
+      runQuery(dataQuery, { genre: genreId, skip, limit }),
+      runQuery(countQuery, { genre: genreId })
+    ]);
+
+    res.json({
+      page,
+      limit,
+      total: countResult[0].get('total').toNumber(),
+      movies: records.map(mapNeo4jToMovie)
+    });
   } catch (error) {
     console.error('Erreur GET /api/movies/genre/:genreId', error);
     res.status(500).json({ message: 'Server error' });
@@ -133,9 +191,8 @@ router.get('/genre/:genreId', async (req, res) => {
 });
 
 /**
- * 3️⃣ GET /api/movies/:id
- * Détail d’un film
- * ⚠️ TOUJOURS EN DERNIER
+ * GET /api/movies/:id
+ * (détail – pas de pagination)
  */
 router.get('/:id', async (req, res) => {
   const { id } = req.params;
@@ -160,8 +217,7 @@ router.get('/:id', async (req, res) => {
       return res.status(404).json({ message: 'Movie not found' });
     }
 
-    const movie = mapNeo4jToMovie(records[0]);
-    res.json(movie);
+    res.json(mapNeo4jToMovie(records[0]));
   } catch (error) {
     console.error('Erreur GET /api/movies/:id:', error);
     res.status(500).json({ message: 'Server error' });

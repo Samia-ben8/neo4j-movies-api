@@ -5,7 +5,6 @@ const router = express.Router();
 
 /**
  * GET /api/genres
- * Liste des genres
  */
 router.get('/', async (req, res) => {
   try {
@@ -23,7 +22,10 @@ router.get('/', async (req, res) => {
       slug: r.get('name').toLowerCase().replace(/\s+/g, '-')
     }));
 
-    res.json(genres);
+    res.json({
+      total: genres.length,
+      genres
+    });
   } catch (error) {
     console.error('Erreur GET /api/genres:', error);
     res.status(500).json({ message: 'Server error' });

@@ -6,8 +6,6 @@ const router = express.Router();
 
 /**
  * GET /api/recommendations/:movieId
- * Recommandations collaboratives
- * "Les utilisateurs qui ont aimé ce film ont aussi aimé..."
  */
 router.get('/:movieId', async (req, res) => {
   const { movieId } = req.params;
@@ -31,11 +29,14 @@ router.get('/:movieId', async (req, res) => {
 
     const records = await runQuery(query, { movieId });
 
-    const movies = records.map(mapNeo4jToMovie);
-
-    res.json(movies);
+    res.json({
+      page: null,
+      limit: 10,
+      total: records.length,
+      movies: records.map(mapNeo4jToMovie)
+    });
   } catch (error) {
-    console.error('Erreur recommandations:', error);
+    console.error('Erreur GET /api/recommendations:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });
